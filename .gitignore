@@ -1,0 +1,9 @@
+*.obj
+*.pdb
+*.opendb
+*.db
+*.idb
+*.ilk
+*.log
+*.tlog
+.vs/VKTriangle/v14/.suo

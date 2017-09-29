@@ -36,8 +36,6 @@ void DestroyDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT
 	}
 }
 
-struct QueueFamilyIndices {};
-
 class VKTriangle {
 public:
 	void run() {
@@ -52,7 +50,11 @@ private:
 
 	VkInstance m_instance;
 	VkDebugReportCallbackEXT m_callback;
-	VkPhysicalDevice m_phyDevice = VK_NULL_HANDLE;
+	
+    VkPhysicalDevice m_phyDevice = VK_NULL_HANDLE;
+    VkDevice m_device;
+
+    VkQueue m_graphicsQueue;
 
 	void initWindow() {
 		glfwInit();
@@ -66,6 +68,7 @@ private:
 		createInstance();
 		createDebugCallback();
 		getPhysicalDevice();
+        createLogicalDevice();
 	}
 
 	void mainLoop() {
@@ -76,6 +79,7 @@ private:
 
 	void cleanup() {
 
+        vkDestroyDevice(m_device, nullptr);
 		DestroyDebugReportCallbackEXT(m_instance, m_callback, nullptr);
 		vkDestroyInstance(m_instance, nullptr);
 
@@ -153,15 +157,47 @@ private:
 		std::vector<VkPhysicalDevice> phyDevices(deviceCount);
 		vkEnumeratePhysicalDevices(m_instance, &deviceCount, phyDevices.data());
 
-		m_phyDevice = chooseOptimalPhysicalDevice(phyDevices);
-
-		if (m_phyDevice = VK_NULL_HANDLE) {
+		if (!findOptimalPhysicalDevice(phyDevices, &m_phyDevice)) {
 			throw std::runtime_error("failed to find a suitable GPU!");
 		}
 	}
 
+    void createLogicalDevice() {
+        int index = findQueueFamily(m_phyDevice, VK_QUEUE_GRAPHICS_BIT);
+
+        VkDeviceQueueCreateInfo queueCreateInfo = {};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueCount = 1;
+        queueCreateInfo.queueFamilyIndex = index;
+        float queuePriority = 1.0f;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+
+        // TODO, fill more features later
+        VkPhysicalDeviceFeatures phyDeviceFeatures = {};
+
+        VkDeviceCreateInfo deviceCreateInfo = {};
+        deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        // Note we do not need to explicitly create queue
+        deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
+        deviceCreateInfo.queueCreateInfoCount = 1;
+        deviceCreateInfo.enabledExtensionCount = 0;
+        deviceCreateInfo.ppEnabledExtensionNames = nullptr;
+        deviceCreateInfo.pEnabledFeatures = &phyDeviceFeatures;
+
+        if (enableValidationLayers) {
+            deviceCreateInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+            deviceCreateInfo.ppEnabledLayerNames = validationLayers.data();
+        } else {
+            deviceCreateInfo.enabledLayerCount = 0;
+        }
+
+        if (vkCreateDevice(m_phyDevice, &deviceCreateInfo, nullptr, &m_device) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create logical device!");
+        }   
+    }
+
 /////////////////////////////////////////////////////////////////
-// Unitiliy member functions to for each Vulkan steps
+// Utility member functions to for each Vulkan steps
 /////////////////////////////////////////////////////////////////
 
 	// get all extension names. Note your system may not support all of them!
@@ -229,44 +265,51 @@ private:
 		return true;
 	}
 
-	VkPhysicalDevice chooseOptimalPhysicalDevice(std::vector<VkPhysicalDevice> phyDevices) {
+	bool findOptimalPhysicalDevice(std::vector<VkPhysicalDevice> phyDevices, VkPhysicalDevice* optimalPhyDevice) {
 
 		// Use the simplest logic here to just pick the first suitable device
 		// TODO: Will driver be able to automatically pick the better GPU?
-		for (auto phyDevice : phyDevices) {
+		for (const auto phyDevice : phyDevices) {
 			if (isPhyiscalDeviceSuitable(phyDevice)) {
-				return phyDevice;
+                *optimalPhyDevice = phyDevice;
+                return true;
 			}
 		}
-		return VK_NULL_HANDLE;
+		return false;
 	}
 
 	bool isPhyiscalDeviceSuitable(VkPhysicalDevice phyDevice) {
 
-		int index = findQueueFamilies(phyDevice, VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_TRANSFER_BIT);
-		return index>=0;
+        bool isSuitable = true;
+        // only care about qualified queue family now
+        if (findQueueFamily(phyDevice, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT) < 0)
+            isSuitable = false;
+
+		return isSuitable;
 	}
 
-	// Pass a combined bit mask of desired queue family flahs here
+	// Pass a combined bit mask of desired queue family flags here
 	//VK_QUEUE_GRAPHICS_BIT = 0x00000001,
 	//VK_QUEUE_COMPUTE_BIT = 0x00000002,
 	//VK_QUEUE_TRANSFER_BIT = 0x00000004,
 	//VK_QUEUE_SPARSE_BINDING_BIT = 0x00000008,
-	int findQueueFamilies(VkPhysicalDevice phyDevice, VkQueueFlags familyFlags) {
+	int findQueueFamily(VkPhysicalDevice phyDevice, VkQueueFlags familyFlags) {
 		
 		uint32_t queueFamilyCount = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(phyDevice, &queueFamilyCount, nullptr);
 		std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
 		vkGetPhysicalDeviceQueueFamilyProperties(phyDevice, &queueFamilyCount, queueFamilies.data());
-				
-		int index = 0;
+
+        int index = 0;
 		for (const auto queueFamily : queueFamilies) {
-			// We will just return the first qualified queue familiy here
+			// We will just return the first qualified queue family here
 			if (queueFamily.queueCount > 0 && queueFamily.queueFlags & familyFlags)
 				return index;
-			index++;
+            index++;
 		}
-		return index;
+
+        // return a negative value if no qualified queuefamily is found
+		return -1;
 	}
 
 /////////////////////////////////////////////////////////////////
